@@ -1,48 +1,68 @@
 package com.mt.mapdemo;
 
+import androidx.annotation.RequiresApi;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.AppCompatTextView;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import android.Manifest;
+import android.app.Dialog;
+import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.location.LocationManager;
+import android.os.Build;
 import android.os.Bundle;
+import android.text.InputType;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
+import android.widget.TextView;
 import android.widget.Toast;
 
-import com.amap.api.location.AMapLocation;
-import com.amap.api.location.AMapLocationClient;
-import com.amap.api.location.AMapLocationClientOption;
-import com.amap.api.location.AMapLocationListener;
 import com.amap.api.maps.AMap;
+import com.amap.api.maps.CameraUpdateFactory;
 import com.amap.api.maps.MapView;
-import com.amap.api.maps.model.BitmapDescriptorFactory;
 import com.amap.api.maps.model.LatLng;
 import com.amap.api.maps.model.Marker;
 import com.amap.api.maps.model.MarkerOptions;
 import com.amap.api.maps.model.PolygonOptions;
+import com.yanzhenjie.nohttp.NoHttp;
+import com.yanzhenjie.nohttp.RequestMethod;
+import com.yanzhenjie.nohttp.rest.OnResponseListener;
+import com.yanzhenjie.nohttp.rest.Request;
+import com.yanzhenjie.nohttp.rest.RequestQueue;
+import com.yanzhenjie.nohttp.rest.Response;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+
+import top.yokey.miuidialog.MiuiInputDialog;
+import top.yokey.miuidialog.MiuiInputListener;
 
 public class MainActivity extends AppCompatActivity {
 
     private MapView mMapView;
     private AMap mAmap;
-    private Button mBtRedrawArea, locationPosition;
-    private boolean mIsEdit;
+    private Button mBtRedrawArea,button1;
+    private TextView tv_title;
+    private TextView change_code;
+    private boolean mIsEdit = true;
 
     private List<LatLng> mLatLnglist;
     private ArrayList<Marker> mMarkerList;
-    private AppCompatTextView locationMessage;
-    private AMapLocationClient locationClient;
-    private AMapLocationClientOption locationOption;
     private LatLng meLocation;
+    private SharedPreferences.Editor editor;
+    private SharedPreferences sharedPreferences;
+    private LoadingDialog loadingDialog;
 
 
     @Override
@@ -50,10 +70,14 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         mBtRedrawArea = findViewById(R.id.button);
-        locationPosition = findViewById(R.id.button2);
-        locationMessage = findViewById(R.id.location);
+        tv_title = findViewById(R.id.tv_title);
+        change_code = findViewById(R.id.change_code);
+        button1 = findViewById(R.id.button1);
 
-        LocationByGaode();    //定位配置
+        LoadingDialog.Builder loadBuilder = new LoadingDialog.Builder(this)
+                .setCancelable(true)
+                .setCancelOutside(false);
+        loadingDialog = loadBuilder.create();
 
         //获取地图控件引用
         mMapView = (MapView) findViewById(R.id.map);
@@ -65,17 +89,59 @@ public class MainActivity extends AppCompatActivity {
             mAmap = mMapView.getMap();
         }
 
+        mAmap.moveCamera(CameraUpdateFactory.zoomTo(18));
         initLatLngData();
-      /*  addArea(Color.parseColor("#050505"), Color.parseColor("#55FF3030"), mLatLnglist);
-        mMarkerList = addMarker(false, mLatLnglist);*/
         initListener();
 
-        if (appLocationPersion()) {
-            locationClient.startLocation();
+        sharedPreferences = getSharedPreferences("map", Context.MODE_PRIVATE);
+        editor = sharedPreferences.edit();
+        String code = sharedPreferences.getString("code", "");
+        if ("".equals(code)) {
+            showCodeDialog("");
         }
+
+
+    }
+
+    private void showCodeDialog(String content) {
+        new MiuiInputDialog.Builder(this)
+                .setCancelable(false)//是否点击外部消失
+                .setTitle("请输入编号")//标题
+                .setContent(content)//内容
+                .setNegativeButton("取消", new MiuiInputListener() {
+                    @Override
+                    public void onClick(String content,Dialog dialog) {
+
+                    }
+                })
+                .setPositiveButton("确认", new MiuiInputListener() {
+                    @Override
+                    public void onClick(String content,Dialog dialog) {
+                        if (content.length() == 0) {
+                            Toast.makeText(MainActivity.this, "请输入编号", Toast.LENGTH_SHORT).show();
+                        } else {
+                            dialog.dismiss();
+                            uploadData();
+                        }
+                    }
+                })//右边的按钮
+                .show();
     }
 
     private void initListener() {
+
+        button1.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                // 从地图上删除所有的overlay（marker，circle，polyline 等对象）
+                if (mLatLnglist.size() != 0) {
+                    mAmap.clear();
+                    mLatLnglist.remove(mLatLnglist.size()-1);
+                    addArea(Color.parseColor("#050505"), Color.parseColor("#55FF3030"), mLatLnglist);
+                    mMarkerList = addMarker(mIsEdit, mLatLnglist);
+                }
+            }
+        });
 
         mBtRedrawArea.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -83,20 +149,30 @@ public class MainActivity extends AppCompatActivity {
                 // 从地图上删除所有的overlay（marker，circle，polyline 等对象）
                 mAmap.clear();
                 addArea(Color.parseColor("#050505"), Color.parseColor("#55FF3030"), mLatLnglist);
-                mIsEdit = false;
-                mMarkerList = addMarker(false, mLatLnglist);
-            }
-        });
+                showCodeDialog("");
+               /* if (mIsEdit) {
 
-        //添加坐标点
-        locationPosition.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                // 从地图上删除所有的overlay（marker，circle，polyline 等对象）
-                mAmap.clear();
-                addArea(Color.parseColor("#050505"), Color.parseColor("#55FF3030"), mLatLnglist);
-                mIsEdit = true;
-                mMarkerList = addMarker(true, mLatLnglist);
+                    if (mLatLnglist.size() < 3) {
+                        Toast.makeText(MainActivity.this, "最少选择三个点", Toast.LENGTH_SHORT).show();
+                    } else {
+
+                        mBtRedrawArea.setText("规划商圈");
+                        tv_title.setVisibility(View.GONE);
+                        change_code.setVisibility(View.VISIBLE);
+
+                        uploadData();
+                        mIsEdit = !mIsEdit;
+                    }
+
+                } else {
+
+                    mBtRedrawArea.setText("确定");
+                    tv_title.setVisibility(View.VISIBLE);
+                    change_code.setVisibility(View.GONE);
+                    mIsEdit = !mIsEdit;
+                }*/
+
+                mMarkerList = addMarker(mIsEdit, mLatLnglist);
             }
         });
 
@@ -132,7 +208,6 @@ public class MainActivity extends AppCompatActivity {
                 // 从地图上删除所有的overlay（marker，circle，polyline 等对象）
                 mAmap.clear();
 
-                LatLng meLocation = marker.getPosition();
                 for (int i = 0; i < mMarkerList.size(); i++) {
                     String markerTitle = marker.getTitle();
                     String oldMarkerTitle = mMarkerList.get(i).getTitle();
@@ -141,15 +216,68 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
                 addArea(Color.parseColor("#050505"), Color.parseColor("#55FF3030"), mLatLnglist);
-                mIsEdit = true;
-                mMarkerList = addMarker(true, mLatLnglist);
-               /* if (!SpatialRelationUtil.isPolygonContainsPoint1(mLatLnglist,meLocation)) {
-                    Toast.makeText(MainActivity.this,"超出管辖区域",Toast.LENGTH_SHORT).show();
-                } else {
-                    Toast.makeText(MainActivity.this,"已管辖区内",Toast.LENGTH_SHORT).show();
-                }*/
+                mMarkerList = addMarker(mIsEdit, mLatLnglist);
+
                 // 删除当前marker并销毁Marker的图片等资源
                 marker.destroy();
+            }
+        });
+
+        change_code.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                String code = sharedPreferences.getString("code", "");
+                showCodeDialog(code);
+            }
+        });
+    }
+
+    @RequiresApi(api = Build.VERSION_CODES.KITKAT)
+    private void uploadData() {
+        StringBuilder stringBuffer = new StringBuilder();
+        String code = sharedPreferences.getString("code", "");
+        RequestQueue mRequestQueue = NoHttp.newRequestQueue();
+        Request<String> request = NoHttp.createStringRequest("https://shop.81dja.com/store/take/marketMap", RequestMethod.POST);
+        for (LatLng latLng : mLatLnglist) {
+            stringBuffer.append(latLng.latitude);
+            stringBuffer.append(",");
+            stringBuffer.append(latLng.longitude);
+            stringBuffer.append(";");
+        }
+        String data =  stringBuffer.toString();
+        String effectiveData = data.substring(0,data.lastIndexOf(";"));
+        request.add("data", effectiveData);
+        request.add("code", code);
+
+        mRequestQueue.add(1, request, new OnResponseListener<String>() {
+            @Override
+            public void onStart(int what) {
+                loadingDialog.show();
+            }
+
+            @Override
+            public void onSucceed(int what, Response<String> response) {
+                Log.d("AAAAAAAAAAAA",response.get());
+                String data = response.get();
+                try {
+                    JSONObject jsonObject = new JSONObject(data);
+                    String code = jsonObject.getString("code");
+                    String msg = jsonObject.getString("msg");
+                    Toast.makeText(MainActivity.this,msg, Toast.LENGTH_SHORT).show();
+                } catch (JSONException e) {
+                    e.printStackTrace();
+                }
+                loadingDialog.dismiss();
+            }
+
+            @Override
+            public void onFailed(int what, Response<String> response) {
+                loadingDialog.dismiss();
+            }
+
+            @Override
+            public void onFinish(int what) {
+                loadingDialog.dismiss();
             }
         });
     }
@@ -170,21 +298,6 @@ public class MainActivity extends AppCompatActivity {
             markerOptions.title(i + "");
             markerOptionsList.add(markerOptions);
         }
-
-      /*  latLnglist.add(meLocation);
-        MarkerOptions markerOptions1 = new MarkerOptions();
-        // 设置Marker覆盖物的位置坐标。Marker经纬度坐标不能为Null，坐标无默认值
-        markerOptions1.position(meLocation);
-        // 设置Marker覆盖物是否可见
-        markerOptions1.visible(visible);
-        // 设置Marker覆盖物是否可拖拽
-        markerOptions1.draggable(visible);
-        markerOptions1.icon(BitmapDescriptorFactory.fromResource(R.drawable.ic_me));
-        // 设置 Marker覆盖物 的标题
-        markerOptions1.title("订单");
-        markerOptionsList.add(markerOptions1);
-*/
-
         // 在地图上添一组图片标记（marker）对象，并设置是否改变地图状态以至于所有的marker对象都在当前地图可视区域范围内显示
         return mAmap.addMarkers(markerOptionsList, true);
     }
@@ -203,7 +316,6 @@ public class MainActivity extends AppCompatActivity {
         // 定义多边形的属性信息
         PolygonOptions polygonOptions = new PolygonOptions();
 
-
         // 添加多个多边形边框的顶点
         for (LatLng latLng : latLnglist) {
             polygonOptions.add(latLng);
@@ -217,57 +329,6 @@ public class MainActivity extends AppCompatActivity {
         // 在地图上添加一个多边形（polygon）对象
         mAmap.addPolygon(polygonOptions);
     }
-
-    private void LocationByGaode() {
-        //初始化Client
-        locationClient = new AMapLocationClient(this.getApplicationContext());
-        locationOption = getDefaultOption();
-        //设置定位参数
-        locationClient.setLocationOption(locationOption);
-        // 设置定位监听
-        locationClient.setLocationListener(locationListener);
-    }
-
-    private AMapLocationClientOption getDefaultOption() {
-        AMapLocationClientOption mOption = new AMapLocationClientOption();
-        mOption.setLocationMode(AMapLocationClientOption.AMapLocationMode.Hight_Accuracy);//可选，设置定位模式，可选的模式有高精度、仅设备、仅网络。默认为高精度模式
-        mOption.setGpsFirst(false);//可选，设置是否gps优先，只在高精度模式下有效。默认关闭
-        mOption.setHttpTimeOut(30000);//可选，设置网络请求超时时间。默认为30秒。在仅设备模式下无效
-        mOption.setInterval(2000);//可选，设置定位间隔。默认为2秒
-        mOption.setNeedAddress(true);//可选，设置是否返回逆地理地址信息。默认是true
-        mOption.setOnceLocation(true);//可选，设置是否单次定位。默认是false
-        mOption.setOnceLocationLatest(false);//可选，设置是否等待wifi刷新，默认为false.如果设置为true,会自动变为单次定位，持续定位时不要使用
-        AMapLocationClientOption.setLocationProtocol(AMapLocationClientOption.AMapLocationProtocol.HTTP);//可选， 设置网络请求的协议。可选HTTP或者HTTPS。默认为HTTP
-        mOption.setSensorEnable(false);//可选，设置是否使用传感器。默认是false
-        mOption.setWifiScan(true); //可选，设置是否开启wifi扫描。默认为true，如果设置为false会同时停止主动刷新，停止以后完全依赖于系统刷新，定位位置可能存在误差
-        mOption.setLocationCacheEnable(true); //可选，设置是否使用缓存定位，默认为true
-        mOption.setGeoLanguage(AMapLocationClientOption.GeoLanguage.DEFAULT);//可选，设置逆地理信息的语言，默认值为默认语言（根据所在地区选择语言）
-        return mOption;
-    }
-
-    AMapLocationListener locationListener = new AMapLocationListener() {
-
-        @Override
-        public void onLocationChanged(AMapLocation location) {
-            if (null != location) {
-                //errCode等于0代表定位成功，其他的为定位失败，具体的可以参照官网定位错误码说明
-                if (location.getErrorCode() == 0) {
-                    locationMessage.setText("当前经纬度为： " + location.getLatitude() + " ， " + location.getLongitude());
-
-                    meLocation = new LatLng(location.getLatitude(), location.getLongitude());
-                    MarkerOptions markerOptions = new MarkerOptions();
-                    markerOptions.draggable(true);
-                    markerOptions.icon(BitmapDescriptorFactory.fromResource(R.drawable.ic_me));
-                    markerOptions.position(meLocation);
-                    markerOptions.title("订单");
-                    mAmap.addMarker(markerOptions);
-                } else {
-                    Toast.makeText(MainActivity.this, "定位失败", Toast.LENGTH_SHORT).show();
-                }
-
-            }
-        }
-    };
 
     private boolean appLocationPersion() {
         //判断时候开启定位权限
