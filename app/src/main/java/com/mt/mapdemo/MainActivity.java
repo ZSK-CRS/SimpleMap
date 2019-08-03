@@ -96,9 +96,9 @@ public class MainActivity extends AppCompatActivity {
         sharedPreferences = getSharedPreferences("map", Context.MODE_PRIVATE);
         editor = sharedPreferences.edit();
         String code = sharedPreferences.getString("code", "");
-        if ("".equals(code)) {
+      /*  if ("".equals(code)) {
             showCodeDialog("");
-        }
+        }*/
 
 
     }
@@ -121,7 +121,7 @@ public class MainActivity extends AppCompatActivity {
                             Toast.makeText(MainActivity.this, "请输入编号", Toast.LENGTH_SHORT).show();
                         } else {
                             dialog.dismiss();
-                            uploadData();
+                            uploadData(content);
                         }
                     }
                 })//右边的按钮
@@ -147,9 +147,14 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onClick(View v) {
                 // 从地图上删除所有的overlay（marker，circle，polyline 等对象）
-                mAmap.clear();
+              /*  mAmap.clear();
                 addArea(Color.parseColor("#050505"), Color.parseColor("#55FF3030"), mLatLnglist);
-                showCodeDialog("");
+                mMarkerList = addMarker(mIsEdit, mLatLnglist);*/
+                if (mLatLnglist.size() < 3) {
+                    Toast.makeText(MainActivity.this, "最少选择三个点", Toast.LENGTH_SHORT).show();
+                } else {
+                    showCodeDialog("");
+                }
                /* if (mIsEdit) {
 
                     if (mLatLnglist.size() < 3) {
@@ -172,7 +177,6 @@ public class MainActivity extends AppCompatActivity {
                     mIsEdit = !mIsEdit;
                 }*/
 
-                mMarkerList = addMarker(mIsEdit, mLatLnglist);
             }
         });
 
@@ -233,9 +237,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @RequiresApi(api = Build.VERSION_CODES.KITKAT)
-    private void uploadData() {
+    private void uploadData(String code) {
         StringBuilder stringBuffer = new StringBuilder();
-        String code = sharedPreferences.getString("code", "");
+
         RequestQueue mRequestQueue = NoHttp.newRequestQueue();
         Request<String> request = NoHttp.createStringRequest("https://shop.81dja.com/store/take/marketMap", RequestMethod.POST);
         for (LatLng latLng : mLatLnglist) {
